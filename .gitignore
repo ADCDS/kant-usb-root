@@ -1,0 +1,5 @@
+out/
+compact_blob.bin
+*.o
+*.bin
+payload/store/
