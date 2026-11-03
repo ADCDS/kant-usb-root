@@ -13,6 +13,11 @@ Status: **hardware-verified**. One insert gives a key-only root dropbear on
 stage1 lazy-unmounts p1 early; the parked trigger thread remains, but the mount
 is detached and the system does not reboot.
 
+Independent verification on live hardware — the gate address and why return
+value 2 is "allow", a userspace proof as root and as `uid=5001`, and a
+host-built unsigned binary — is in [VERIFICATION.md](VERIFICATION.md). The
+one-shot check on a running TV is [`tools/verify-uep.sh`](tools/verify-uep.sh).
+
 ## Build
 
 ```sh
