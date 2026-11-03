@@ -11,7 +11,9 @@ developed against the `T-KTMUABC` 1410.1 uImage and exFAT modules and uses the
 Status: **hardware-verified**. One insert gives a key-only root dropbear on
 `0.0.0.0:22`; `ssh ... root@<TV_IP>` returns `uid=0(root)`. The TV stays up:
 stage1 lazy-unmounts p1 early; the parked trigger thread remains, but the mount
-is detached and the system does not reboot.
+is detached and the system does not reboot. The 288-byte stage now parks that
+thread with `schedule_timeout_uninterruptible(250)` instead of spinning with
+`b .`, so it no longer pins a core; see [VERIFICATION.md](VERIFICATION.md).
 
 Independent verification on live hardware — the gate address and why return
 value 2 is "allow", a userspace proof as root and as `uid=5001`, and a
@@ -83,8 +85,9 @@ The **288-byte** stage at `uniname+1420` then:
 2. calls `call_usermodehelper("/bin/sh", {"-c",
    "sh</opt/media/USBDriveA2/s"}, NULL, UMH_NO_WAIT)` — the signed shell reads
    stage1 from p2 as its stdin (no script exec, no UEP script gate);
-3. parks the readdir thread with `b .` (preemptible); the queued stage1 then
-   detaches p1 and installs the dropbear.
+3. parks the readdir thread with `schedule_timeout_uninterruptible(250)` — it
+   sleeps in D state instead of pinning a core; the queued stage1 then detaches
+   p1 and installs the dropbear.
 
 `stage1` is derived from the Luminger stage: it atomically takes
 `/tmp/.samsung-usb-rooted`, lazy-unmounts p1, copies the dropbear/keys to
@@ -92,9 +95,10 @@ The **288-byte** stage at `uniname+1420` then:
 mounted.
 
 Addresses (shipped uImage, load `0xc0008000`): UEP `0xc0211c70`, coherent
-`0xc001bfbc`, UMH `0xc00389c4`, ldmge `0xc051ad5c`, copy window `0xc0100904`,
-memcpy `0xc023e740`, flush wrapper `0xc001254c`. The p1 trigger's epilogue slots
-are `r6=0xc00083dc`, `fp=0xc0008424`, `sp=0xc0008e00`, `pc=0xc051ad5c`.
+`0xc001bfbc`, UMH `0xc00389c4`, park `0xc0506f44`, ldmge `0xc051ad5c`, copy
+window `0xc0100904`, memcpy `0xc023e740`, flush wrapper `0xc001254c`. The p1
+trigger's epilogue slots are `r6=0xc00083dc`, `fp=0xc0008424`,
+`sp=0xc0008e00`, `pc=0xc051ad5c`.
 
 ## Caveats
 
@@ -104,7 +108,11 @@ are `r6=0xc00083dc`, `fp=0xc0008424`, `sp=0xc0008e00`, `pc=0xc051ad5c`.
   mutex. stage1's early `umount -l` detaches the mount so the scanner's other
   workers stop; the parked thread remains and the scanner process may be killed
   by its watchdog, but the TV stays up. Do not have the helper open anything on
-  p1 — that is why the command reads stage1 from p2.
+  p1 — that is why the command reads stage1 from p2. The park loop sleeps 250
+  jiffies per iteration: verified `media-server` `TIME 00:00:00` after 4:51
+  (previously `45:40` over 46:11; load 21.37 -> 13.62). It still holds the inode
+  mutex, so the scanner's D-state backlog and UI sluggishness remain until a
+  reboot with the stick removed.
 * The UEP patch is runtime-only: it is re-applied on every boot from the stick.
   No firmware or rootfs is modified. `/opt` writes (dropbear, keys,
   authorized_keys) persist; `/run` and `/tmp` do not.
