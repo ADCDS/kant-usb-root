@@ -81,6 +81,35 @@ ssh -i ~/.ssh/tv_root_ed25519 root@<TV_IP> id
 uid=0(root) gid=0(root) groups=0(root),29(audio),... context="_"
 ```
 
+## 5. Park — no more pegged core
+
+The first 288-byte stage ended in `b .`; after UMH the readdir thread spun in
+kernel mode: `media-server` accumulated `TIME 45:40` over `ELAPSED 46:11`
+(`stime` 684,963 ticks), one core pegged, load average 21.37.
+
+The park stage ends in `schedule_timeout_uninterruptible(250)` (`0xc0506f44`)
+and repeats. On the next boot:
+
+```
+media-server PID 1220  ELAPSED 04:51  TIME 00:00:00  STAT Dsl  PSR 1
+utime=76  stime=20
+load average: 13.62 8.38 3.65
+D_total=15
+/tmp/e -> UEP-AUTO-OK
+stage1 log: dropbear /opt -V rc=0: Dropbear v2022.83
+            service after: active
+            dropbear active; changed=0
+ssh -i ~/.ssh/tv_root_ed25519 root@<TV_IP> id -> uid=0(root)
+```
+
+stage1's `umount -l p1` detached p1; only `sda2` remains mounted. The thread
+still holds p1's inode mutex, so the scanner's D-state backlog/UI remains until
+a reboot with the stick removed.
+
+To keep the blob at 288 bytes, the 4-byte pad was removed (`FULL=DEST+132`) and
+the argv array is built with `stmia r4,{r0-r3}`; the UEP patch, UMH command, p2
+stage1 and dropbear are unchanged.
+
 ## Notes
 
 - The patch is RAM-only. Re-insert the stick (or keep it inserted across
